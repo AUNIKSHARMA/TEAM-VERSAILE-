@@ -1,0 +1,175 @@
+from IPython.display import HTML
+HTML('''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoPulse - Planetary Carbon Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Chart.js for visualization -->
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f8f0; color: #333; }
+        h1 { text-align: center; color: #2e7d32; }
+        .container { max-width: 1200px; margin: auto; display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+        .input-section { background: #e8f5e8; padding: 20px; border-radius: 8px; }
+        .dashboard { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        input, select, button { display: block; width: 100%; margin: 10px 0; padding: 10px; }
+        button { background: #4caf50; color: white; border: none; cursor: pointer; }
+        button:hover { background: #45a049; }
+        canvas { max-width: 100%; height: 300px; }
+        #realTimeData { margin-top: 20px; font-weight: bold; color: #ff5722; }
+        #offsetBtn { background: #2196f3; }
+    </style>
+</head>
+<body>
+    <h1>EcoPulse - Transparent Carbon Tracker</h1>
+    <div class="container">
+        <div class="input-section">
+            <h2>Your Inputs</h2>
+            <label>Electricity Usage (kWh/month):</label>
+            <input type="number" id="electricity" placeholder="e.g., 500">
+
+            <label>Vehicle Miles Driven (per month):</label>
+            <input type="number" id="miles" placeholder="e.g., 1000">
+
+            <label>Flights Taken (per year):</label>
+            <input type="number" id="flights" placeholder="e.g., 2">
+
+            <label>Diet Type:</label>
+            <select id="diet">
+                <option value="omnivore">Omnivore</option>
+                <option value="vegetarian">Vegetarian</option>
+                <option value="vegan">Vegan</option>
+            </select>
+
+            <button id="calculateBtn">Calculate Footprint</button>
+            <button id="offsetBtn">Offset Carbon</button>
+        </div>
+
+        <div class="dashboard">
+            <h2>Your Carbon Dashboard</h2>
+            <p id="footprint">Total Footprint: -- kg CO2/month</p>
+            <canvas id="carbonChart"></canvas>
+            <canvas id="comparisonChart"></canvas>
+            <div id="realTimeData">Real-Time Global Data: Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        // API Key (Sign up at carboninterface.com for free; replace with yours)
+        const API_KEY = 'YOUR_API_KEY_HERE'; // Get from https://www.carboninterface.com/
+        const API_URL = 'https://www.carboninterface.com/api/v1/estimates';
+
+        let carbonChart, comparisonChart;
+        let userFootprint = 0;
+
+        // Initialize Charts
+        function initCharts() {
+            const ctx1 = document.getElementById('carbonChart').getContext('2d');
+            carbonChart = new Chart(ctx1, {
+                type: 'pie',
+                data: {
+                    labels: ['Electricity', 'Transport', 'Flights', 'Diet'],
+                    datasets: [{ data: [0, 0, 0, 0], backgroundColor: ['#ff6384', '#36a2eb', '#cc65fe', '#ffce56'] }]
+                },
+                options: { responsive: true, title: { display: true, text: 'Carbon Breakdown' } }
+            });
+
+            const ctx2 = document.getElementById('comparisonChart').getContext('2d');
+            comparisonChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: ['You', 'Average US', 'Global Average'],
+                    datasets: [{ label: 'kg CO2/month', data: [0, 2000, 800], backgroundColor: '#4caf50' }]
+                },
+                options: { responsive: true, title: { display: true, text: 'Comparison' } }
+            });
+        }
+
+        // Carbon Estimation Logic
+        async function calculateFootprint() {
+            const electricity = parseFloat(document.getElementById('electricity').value) || 0;
+            const miles = parseFloat(document.getElementById('miles').value) || 0;
+            const flights = parseFloat(document.getElementById('flights').value) || 0;
+            const diet = document.getElementById('diet').value;
+
+            // Formulas (based on EPA/approximations; API for accuracy)
+            let footprint = (electricity * 0.4) + (miles * 0.4) + (flights * 200); // Basic calc
+            if (diet === 'vegetarian') footprint *= 0.8;
+            if (diet === 'vegan') footprint *= 0.6;
+
+            // API Call for Precise Estimate
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'electricity',
+                        electricity_unit: 'kwh',
+                        electricity_value: electricity,
+                        country: 'us'
+                    })
+                });
+                const data = await response.json();
+                footprint = data.data.attributes.carbon_kg * 12; // Annualize
+            } catch (error) {
+                console.log('API failed, using estimate:', error);
+            }
+
+            userFootprint = footprint;
+            document.getElementById('footprint').textContent = `Total Footprint: ${footprint.toFixed(2)} kg CO2/month`;
+
+            // Update Charts
+            carbonChart.data.datasets[0].data = [electricity * 0.4, miles * 0.4, flights * 200, footprint * 0.1];
+            carbonChart.update();
+
+            comparisonChart.data.datasets[0].data = [footprint, 2000, 800];
+            comparisonChart.update();
+        }
+
+        // Offset Carbon (Simulated via API)
+        async function offsetCarbon() {
+            if (!userFootprint) return alert('Calculate footprint first!');
+            try {
+                const response = await fetch(`${API_URL}/offsets`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ carbon_kg: userFootprint })
+                });
+                const data = await response.json();
+                alert(`Offset successful! Cost: $${data.data.attributes.cost_usd}`);
+            } catch (error) {
+                alert('Offset failed. Try again.');
+            }
+        }
+
+        // Real-Time Updates (Poll API every 30s)
+        async function updateRealTimeData() {
+            try {
+                const response = await fetch('https://api.carbonintensity.org.uk/intensity'); // Public API for UK grid
+                const data = await response.json();
+                document.getElementById('realTimeData').textContent = `Real-Time Global Data: UK Grid Intensity: ${data.data[0].intensity.actual} gCO2/kWh`;
+            } catch (error) {
+                document.getElementById('realTimeData').textContent = 'Real-Time Data: Offline';
+            }
+        }
+
+        // Event Listeners
+        document.getElementById('calculateBtn').addEventListener('click', calculateFootprint);
+        document.getElementById('offsetBtn').addEventListener('click', offsetCarbon);
+
+        // Initialize
+        initCharts();
+        updateRealTimeData();
+        setInterval(updateRealTimeData, 30000); // Real-time every 30s
+    </script>
+</body>
+</html>
+''')
+
